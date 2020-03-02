@@ -16,5 +16,9 @@ CHIP PC {
     OUT out[16];
 
     PARTS:
-    // Put your code here:
+    ALU(x=cval, y[0..15]=false, zx=false, nx=inc, zy=true, ny=true, f=inc, no=inc, out=a);
+    Mux16(a=a, b=in, sel=load, out=b);
+    Mux16(a=b, b[0..15]=false, sel=reset, out=c);
+    Register(in=c, load=true, out=cval);
+    And16(a=cval, b[0..15]=true, out=out);
 }
