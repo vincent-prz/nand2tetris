@@ -14,5 +14,8 @@ CHIP Bit {
     OUT out;
 
     PARTS:
-    // Put your code here:
+    // cannot connect out to internal pin, hence creating intermediary `y` pin
+    Mux(a=y, b=in, sel=load, out=x);
+    DFF(in=x, out=y);
+    And(a=y, b=true, out=out);
 }
