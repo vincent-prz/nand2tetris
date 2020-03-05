@@ -1,0 +1,23 @@
+/**
+ * Parse and decode a 16 bit Hack instruction.
+ */
+CHIP Decoder {
+    IN instruction[16];
+    OUT i, a, c1, c2, c3, c4, c5, c6, d1, d2, d3, j1, j2, j3;
+
+    PARTS:
+    And(a=instruction[15], b=true, out=i);
+    And(a=instruction[12], b=true, out=a);
+    And(a=instruction[11], b=true, out=c1);
+    And(a=instruction[10], b=true, out=c2);
+    And(a=instruction[9], b=true, out=c3);
+    And(a=instruction[8], b=true, out=c4);
+    And(a=instruction[7], b=true, out=c5);
+    And(a=instruction[6], b=true, out=c6);
+    And(a=instruction[5], b=true, out=d1);
+    And(a=instruction[4], b=true, out=d2);
+    And(a=instruction[3], b=true, out=d3);
+    And(a=instruction[2], b=true, out=j1);
+    And(a=instruction[1], b=true, out=j2);
+    And(a=instruction[0], b=true, out=j3);
+}
