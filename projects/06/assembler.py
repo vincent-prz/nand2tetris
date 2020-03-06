@@ -3,7 +3,6 @@ import sys
 
 class Parser:
     def __init__(self, stream):
-        self._stream = stream
         self._cmds = []
         for line in stream.readlines():
             if line.isspace():
@@ -15,7 +14,8 @@ class Parser:
         self._cmd_index = -1
 
     def _clean_cmd(self, line):
-        return "".join([c for c in line if not c.isspace()])
+        """Remove whitespace and inline comments. """
+        return "".join([c for c in line if not c.isspace()]).split("//")[0]
 
     def has_more_commands(self):
         return self._cmd_index < len(self._cmds) - 1
@@ -69,6 +69,9 @@ class Parser:
     def current_command(self):
         if self._cmd_index >= 0:
             return self._cmds[self._cmd_index]
+
+    def reset(self):
+        self._cmd_index = -1
 
 
 def encode_dest(dest):
@@ -171,29 +174,104 @@ def to_15_bits(n):
     return bits[::-1]
 
 
+class SymbolTable:
+    def __init__(self):
+        self._data = {
+            "R0": 0,
+            "R1": 1,
+            "R2": 2,
+            "R3": 3,
+            "R4": 4,
+            "R5": 5,
+            "R6": 6,
+            "R7": 7,
+            "R8": 8,
+            "R9": 9,
+            "R10": 10,
+            "R11": 11,
+            "R12": 12,
+            "R13": 13,
+            "R14": 14,
+            "R15": 15,
+            "SP": 0,
+            "LCL": 1,
+            "ARG": 2,
+            "THIS": 3,
+            "THAT": 4,
+            "SCREEN": 16384,
+            "KBD": 24576,
+        }
+        self._ram_index = 16
+
+    def add_entry(self, symbol, address=None):
+        if symbol in self._data:
+            raise ValueError(f"symbol {symbol} already in table")
+        if address is None:
+            address = self._ram_index
+            self._ram_index += 1
+        self._data[symbol] = address
+        return address
+
+    def contains(self, symbol):
+        return symbol in self._data
+
+    def get_address(self, symbol):
+        return self._data[symbol]
+
+
+def first_pass(parser, symbol_table):
+    rom_index = 0
+    while parser.has_more_commands():
+        parser.advance()
+        if parser.command_type() == "L_COMMAND":
+            symbol = parser.symbol()
+            if symbol_table.contains(symbol):
+                raise ValueError(f"symbol {symbol} defined multiple times")
+            symbol_table.add_entry(symbol, rom_index)
+        else:
+            rom_index += 1
+
+
+def second_pass(parser, symbol_table):
+    translated_lines = []
+    while parser.has_more_commands():
+        parser.advance()
+        current_translated_line = []
+        if parser.command_type() == "A_COMMAND":
+            symbol = parser.symbol()
+            if symbol.isdigit():
+                address = int(symbol)
+            elif symbol_table.contains(symbol):
+                address = symbol_table.get_address(symbol)
+            else:
+                address = symbol_table.add_entry(symbol)
+            current_translated_line = [0] + to_15_bits(address)
+        elif parser.command_type() == "C_COMMAND":
+            encoded_comp = encode_comp(parser.comp())
+            encoded_dest = encode_dest(parser.dest())
+            encoded_jump = encode_jump(parser.jump())
+            current_translated_line = (
+                [1, 1, 1] + encoded_comp + encoded_dest + encoded_jump
+            )
+        else:
+            continue
+        translated_lines.append(current_translated_line)
+    return translated_lines
+
+
 if __name__ == "__main__":
     filename = sys.argv[1]
-    translated_lines = []
     with open(filename) as stream:
         parser = Parser(stream)
-        while parser.has_more_commands():
-            parser.advance()
-            current_translated_line = []
-            if parser.command_type() == "A_COMMAND":
-                symbol = parser.symbol()
-                current_translated_line = [0] + to_15_bits(int(symbol))
-            elif parser.command_type() == "C_COMMAND":
-                encoded_comp = encode_comp(parser.comp())
-                encoded_dest = encode_dest(parser.dest())
-                encoded_jump = encode_jump(parser.jump())
-                current_translated_line = (
-                    [1, 1, 1] + encoded_comp + encoded_dest + encoded_jump
-                )
-            else:
-                continue
-            translated_lines.append(current_translated_line)
+    symbol_table = SymbolTable()
+    first_pass(parser, symbol_table)
+    parser.reset()
+    translated_lines = second_pass(parser, symbol_table)
 
-    output_filename = filename.split(".")[0] + "1.hack"
+    if len(sys.argv) > 2:
+        output_filename = sys.argv[2]
+    else:
+        output_filename = filename.split(".")[0] + ".hack"
     with open(output_filename, "w") as output_stream:
         for tl in translated_lines:
             output_stream.write("".join(str(b) for b in tl) + "\n")
