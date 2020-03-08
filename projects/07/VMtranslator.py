@@ -52,7 +52,6 @@ class Parser:
 
 
 class StringBuilder:
-
     def __init__(self, s=None):
         if s is not None:
             self._strs = [s]
@@ -65,6 +64,7 @@ class StringBuilder:
 
     def build(self):
         return "\n".join(self._strs) + "\n"
+
 
 class CodeWriter:
     # NOTE: CodeWriter is owning the stream, and this is responsible for closing it
@@ -145,12 +145,34 @@ class CodeWriter:
         sb += "M=M-1"
         return sb
 
-
     def write_push_pop(self, cmd, segment, index):
-        if segment != "constant":
-            return
-        sb = StringBuilder(f"// {cmd} {segment} {index}")
         if cmd == "C_PUSH":
+            sb = self._build_push(cmd, segment, index)
+        elif cmd == "C_POP":
+            sb = self._build_pop(cmd, segment, index)
+        self._stream.write(sb.build())
+        self._nb_cmd += 1
+
+    def _get_segment_base(self, segment, index):
+        if segment == "local":
+            return "LCL"
+        elif segment == "argument":
+            return "ARG"
+        elif segment == "this":
+            return "THIS"
+        elif segment == "that":
+            return "THAT"
+        elif segment == "pointer":
+            return "R3"
+        elif segment == "temp":
+            return "R5"
+        elif segment == "static":
+            return f"{self._filename}.{index}"
+        raise ValueError(f"unknown segment {segment}")
+
+    def _build_push(self, cmd, segment, index):
+        if segment == "constant":
+            sb = StringBuilder(f"// {cmd} {segment} {index}")
             sb += f"@{index}"
             sb += "D=A"
             sb += "@SP"
@@ -158,9 +180,55 @@ class CodeWriter:
             sb += "M=D"
             sb += "@SP"
             sb += "M=M+1"
+            return sb
 
-        self._stream.write(sb.build())
-        self._nb_cmd += 1
+        base = self._get_segment_base(segment, index)
+        sb = StringBuilder(f"// {cmd} {segment} {index}")
+        sb += f"@{base}"
+        # put in D the content of the address we want to push from
+        if segment in ["pointer", "temp"]:
+            sb += "D=A"
+        else:
+            sb += "D=M"
+        if segment != "static":
+            sb += f"@{index}"
+            sb += "A=A+D"
+            sb += "D=M"
+
+        sb += "@SP"
+        sb += "A=M"
+        sb += "M=D"
+        sb += "@SP"
+        sb += "M=M+1"
+        return sb
+
+    def _build_pop(self, cmd, segment, index):
+        if segment == "constant":
+            raise ValueError("cannot pop to constant segment")
+
+        base = self._get_segment_base(segment, index)
+        sb = StringBuilder(f"// {cmd} {segment} {index}")
+        sb += f"@{base}"
+        # put in D the address we want to pop to
+        if segment in ["pointer", "temp", "static"]:
+            sb += "D=A"
+        else:
+            sb += "D=M"
+        if segment != "static":
+            sb += f"@{index}"
+            sb += "D=A+D"
+
+        sb += "@R13"
+        sb += "M=D"
+        sb += "@SP"
+        sb += "A=M-1"
+        sb += "D=M"
+        sb += "@R13"
+        sb += "A=M"
+        sb += "M=D"
+        sb += "@SP"
+        sb += "M=M-1"
+        return sb
 
     def close(self):
         self._stream.close()
@@ -170,15 +238,18 @@ if __name__ == "__main__":
     filename = sys.argv[1]
     with open(filename) as input_file:
         parser = Parser(input_file)
-    output_filename = filename.split(".")[0] + ".asm"
+    filename_prefix = filename.split(".")[0]
+    output_filename = filename_prefix + ".asm"
     output_file = open(output_filename, "w")
     code_writer = CodeWriter(output_file)
+    # TODO: use path lib
+    code_writer.set_filename(filename_prefix.split("/")[-1])
     while parser.has_more_commands():
         parser.advance()
         cmd_type = parser.command_type()
         if cmd_type == "C_ARITHMETIC":
             code_writer.write_arithmetic(parser.current_command)
-        elif cmd_type == "C_PUSH":
+        elif cmd_type in ["C_PUSH", "C_POP"]:
             segment = parser.arg1()
             index = parser.arg2()
             code_writer.write_push_pop(cmd_type, segment, index)
