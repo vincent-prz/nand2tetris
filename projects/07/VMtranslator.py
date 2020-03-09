@@ -51,107 +51,81 @@ class Parser:
             return self._cmds[self._cmd_index]
 
 
-class StringBuilder:
-    def __init__(self, s=None):
-        if s is not None:
-            self._strs = [s]
-        else:
-            self._strs = []
-
-    def __add__(self, s):
-        self._strs.append(s)
-        return self
-
-    def build(self):
-        return "\n".join(self._strs) + "\n"
-
-
 class CodeWriter:
     # NOTE: CodeWriter is owning the stream, and this is responsible for closing it
     def __init__(self, stream):
         self._stream = stream
         self._filename = None
-        self._nb_cmd = 0
+        self._asm_cmd_index = 0
 
     def set_filename(self, filename):
         self._filename = filename
 
     def write_arithmetic(self, cmd):
-        sb = None
         if cmd == "add":
-            sb = self._build_binary_op(cmd, "+")
+            self._write_binary_op(cmd, "+")
         elif cmd == "sub":
-            sb = self._build_binary_op(cmd, "-")
+            self._write_binary_op(cmd, "-")
         elif cmd == "and":
-            sb = self._build_binary_op(cmd, "&")
+            self._write_binary_op(cmd, "&")
         elif cmd == "or":
-            sb = self._build_binary_op(cmd, "|")
+            self._write_binary_op(cmd, "|")
         elif cmd == "neg":
-            sb = self._build_unary_op(cmd, "-")
+            self._write_unary_op(cmd, "-")
         elif cmd == "not":
-            sb = self._build_unary_op(cmd, "!")
+            self._write_unary_op(cmd, "!")
         elif cmd == "eq":
-            sb = self._build_compare_op(cmd, "JEQ")
+            self._write_compare_op(cmd, "JEQ")
         elif cmd == "lt":
-            sb = self._build_compare_op(cmd, "JLT")
+            self._write_compare_op(cmd, "JLT")
         elif cmd == "gt":
-            sb = self._build_compare_op(cmd, "JGT")
+            self._write_compare_op(cmd, "JGT")
         else:
             raise ValueError(f"unrecognized arithmetic operation: {cmd}")
 
-        self._stream.write(sb.build())
-        self._nb_cmd += 1
+    def _write_binary_op(self, cmd, op):
+        self._write_asm_cmd(f"// {cmd}")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M-1")
+        self._write_asm_cmd("D=M")
+        self._write_asm_cmd("A=A-1")
+        self._write_asm_cmd(f"M=M{op}D")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=M-1")
 
-    def _build_binary_op(self, cmd, op):
-        sb = StringBuilder(f"// {cmd}")
-        sb += "@SP"
-        sb += "A=M-1"
-        sb += "D=M"
-        sb += "A=A-1"
-        sb += f"M=M{op}D"
-        sb += "@SP"
-        sb += "M=M-1"
-        return sb
+    def _write_unary_op(self, cmd, op):
+        self._write_asm_cmd(f"// {cmd}")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M-1")
+        self._write_asm_cmd(f"M={op}M")
 
-    def _build_unary_op(self, cmd, op):
-        sb = StringBuilder(f"// {cmd}")
-        sb += "@SP"
-        sb += "A=M-1"
-        sb += f"M={op}M"
-        return sb
-
-    def _build_compare_op(self, cmd, jmp):
-        sb = StringBuilder(f"// {cmd}")
-        sb += "@SP"
-        sb += "A=M-1"
-        sb += "D=M"
-        sb += "A=A-1"
-        sb += "D=M-D"
-        sb += f"@SET_TRUE_{self._nb_cmd}"
-        sb += f"D;{jmp}"
-        sb += "@SP"
-        sb += "A=M-1"
-        sb += "A=A-1"
-        sb += "M=0"
-        sb += f"@END_SET_TRUE_{self._nb_cmd}"
-        sb += f"0;JMP"
-        sb += f"(SET_TRUE_{self._nb_cmd})"
-        sb += "@SP"
-        sb += "A=M-1"
-        sb += "A=A-1"
-        sb += "M=-1"
-        sb += f"(END_SET_TRUE_{self._nb_cmd})"
-        sb += "@SP"
-        sb += "M=M-1"
-        return sb
+    def _write_compare_op(self, cmd, jmp):
+        self._write_asm_cmd(f"// {cmd}")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M-1")
+        self._write_asm_cmd("D=M")
+        self._write_asm_cmd("A=A-1")
+        self._write_asm_cmd("D=M-D")
+        self._write_asm_cmd(f"@{self._asm_cmd_index + 8}")
+        self._write_asm_cmd(f"D;{jmp}")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M-1")
+        self._write_asm_cmd("A=A-1")
+        self._write_asm_cmd("M=0")
+        self._write_asm_cmd(f"@{self._asm_cmd_index + 6}")
+        self._write_asm_cmd("0;JMP")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M-1")
+        self._write_asm_cmd("A=A-1")
+        self._write_asm_cmd("M=-1")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=M-1")
 
     def write_push_pop(self, cmd, segment, index):
         if cmd == "C_PUSH":
-            sb = self._build_push(cmd, segment, index)
+            self._write_push(cmd, segment, index)
         elif cmd == "C_POP":
-            sb = self._build_pop(cmd, segment, index)
-        self._stream.write(sb.build())
-        self._nb_cmd += 1
+            self._write_pop(cmd, segment, index)
 
     def _get_segment_base(self, segment, index):
         if segment == "local":
@@ -170,65 +144,69 @@ class CodeWriter:
             return f"{self._filename}.{index}"
         raise ValueError(f"unknown segment {segment}")
 
-    def _build_push(self, cmd, segment, index):
+    def _write_push(self, cmd, segment, index):
         if segment == "constant":
-            sb = StringBuilder(f"// {cmd} {segment} {index}")
-            sb += f"@{index}"
-            sb += "D=A"
-            sb += "@SP"
-            sb += "A=M"
-            sb += "M=D"
-            sb += "@SP"
-            sb += "M=M+1"
-            return sb
+            self._write_asm_cmd(f"// {cmd} {segment} {index}")
+            self._write_asm_cmd(f"@{index}")
+            self._write_asm_cmd("D=A")
+            self._write_asm_cmd("@SP")
+            self._write_asm_cmd("A=M")
+            self._write_asm_cmd("M=D")
+            self._write_asm_cmd("@SP")
+            self._write_asm_cmd("M=M+1")
+            return
 
         base = self._get_segment_base(segment, index)
-        sb = StringBuilder(f"// {cmd} {segment} {index}")
-        sb += f"@{base}"
+        self._write_asm_cmd(f"// {cmd} {segment} {index}")
+        self._write_asm_cmd(f"@{base}")
         # put in D the content of the address we want to push from
         if segment in ["pointer", "temp"]:
-            sb += "D=A"
+            self._write_asm_cmd("D=A")
         else:
-            sb += "D=M"
+            self._write_asm_cmd("D=M")
         if segment != "static":
-            sb += f"@{index}"
-            sb += "A=A+D"
-            sb += "D=M"
+            self._write_asm_cmd(f"@{index}")
+            self._write_asm_cmd("A=A+D")
+            self._write_asm_cmd("D=M")
 
-        sb += "@SP"
-        sb += "A=M"
-        sb += "M=D"
-        sb += "@SP"
-        sb += "M=M+1"
-        return sb
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M")
+        self._write_asm_cmd("M=D")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=M+1")
 
-    def _build_pop(self, cmd, segment, index):
+    def _write_pop(self, cmd, segment, index):
         if segment == "constant":
             raise ValueError("cannot pop to constant segment")
 
         base = self._get_segment_base(segment, index)
-        sb = StringBuilder(f"// {cmd} {segment} {index}")
-        sb += f"@{base}"
+        self._write_asm_cmd(f"// {cmd} {segment} {index}")
+        self._write_asm_cmd(f"@{base}")
         # put in D the address we want to pop to
         if segment in ["pointer", "temp", "static"]:
-            sb += "D=A"
+            self._write_asm_cmd("D=A")
         else:
-            sb += "D=M"
+            self._write_asm_cmd("D=M")
         if segment != "static":
-            sb += f"@{index}"
-            sb += "D=A+D"
+            self._write_asm_cmd(f"@{index}")
+            self._write_asm_cmd("D=A+D")
 
-        sb += "@R13"
-        sb += "M=D"
-        sb += "@SP"
-        sb += "A=M-1"
-        sb += "D=M"
-        sb += "@R13"
-        sb += "A=M"
-        sb += "M=D"
-        sb += "@SP"
-        sb += "M=M-1"
-        return sb
+        self._write_asm_cmd("@R13")
+        self._write_asm_cmd("M=D")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M-1")
+        self._write_asm_cmd("D=M")
+        self._write_asm_cmd("@R13")
+        self._write_asm_cmd("A=M")
+        self._write_asm_cmd("M=D")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=M-1")
+
+    def _write_asm_cmd(self, cmd):
+        self._stream.write(f"{cmd}\n")
+        # do not count comments
+        if not cmd.startswith("//"):
+            self._asm_cmd_index += 1
 
     def close(self):
         self._stream.close()
