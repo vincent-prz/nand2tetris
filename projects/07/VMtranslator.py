@@ -158,8 +158,8 @@ class CodeWriter:
 
         base = self._get_segment_base(segment, index)
         self._write_asm_cmd(f"// {cmd} {segment} {index}")
-        self._write_asm_cmd(f"@{base}")
         # put in D the content of the address we want to push from
+        self._write_asm_cmd(f"@{base}")
         if segment in ["pointer", "temp"]:
             self._write_asm_cmd("D=A")
         else:
@@ -169,6 +169,7 @@ class CodeWriter:
             self._write_asm_cmd("A=A+D")
             self._write_asm_cmd("D=M")
 
+        # push D to the top of the stack
         self._write_asm_cmd("@SP")
         self._write_asm_cmd("A=M")
         self._write_asm_cmd("M=D")
@@ -181,8 +182,8 @@ class CodeWriter:
 
         base = self._get_segment_base(segment, index)
         self._write_asm_cmd(f"// {cmd} {segment} {index}")
-        self._write_asm_cmd(f"@{base}")
         # put in D the address we want to pop to
+        self._write_asm_cmd(f"@{base}")
         if segment in ["pointer", "temp", "static"]:
             self._write_asm_cmd("D=A")
         else:
@@ -191,6 +192,9 @@ class CodeWriter:
             self._write_asm_cmd(f"@{index}")
             self._write_asm_cmd("D=A+D")
 
+        # pop to target address
+        # use R13 to store the target address.
+        # this is allowed as per the standard VM mapping.
         self._write_asm_cmd("@R13")
         self._write_asm_cmd("M=D")
         self._write_asm_cmd("@SP")
