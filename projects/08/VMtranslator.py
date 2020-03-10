@@ -1,3 +1,4 @@
+import os
 import sys
 
 
@@ -15,7 +16,7 @@ class Parser:
 
     def _clean_cmd(self, line):
         """Remove inline comments. """
-        return line.split("//")[0]
+        return line.split("//")[0].strip()
 
     def has_more_commands(self):
         return self._cmd_index < len(self._cmds) - 1
@@ -35,6 +36,12 @@ class Parser:
             return "C_GOTO"
         if current_cmd.startswith("if-goto"):
             return "C_IF"
+        if current_cmd.startswith("call"):
+            return "C_CALL"
+        if current_cmd.startswith("function"):
+            return "C_FUNCTION"
+        if current_cmd == "return":
+            return "C_RETURN"
         return "C_ARITHMETIC"
 
     def arg1(self):
@@ -48,7 +55,7 @@ class Parser:
     def arg2(self):
         cmd_type = self.command_type()
         args = self.current_command.split()
-        if cmd_type in ["C_PUSH", "C_POP"]:
+        if cmd_type in ["C_PUSH", "C_POP", "C_FUNCTION", "C_CALL"]:
             return int(args[2])
         raise ValueError(f"unexpected call to arg2 for a {cmd_type} command.")
 
@@ -59,15 +66,27 @@ class Parser:
 
 
 class CodeWriter:
-    # NOTE: CodeWriter is owning the stream, and this is responsible for closing it
+    # NOTE: CodeWriter is owning the stream, and thus is responsible for closing it
     def __init__(self, stream):
         self._stream = stream
         self._filename = None
         self._asm_cmd_index = 0
-        self._current_function = "Sys.init"
+        self._current_function_name = None
 
     def set_filename(self, filename):
         self._filename = filename
+
+    def write_bootstrap_code(self):
+        # SP = 256
+        self._write_asm_cmd("@256")
+        self._write_asm_cmd("D=A")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=D")
+        # call Sys.init
+        self.write_call("Sys.init", 0)
+        # infinite loop
+        self._write_asm_cmd(f"@{self._asm_cmd_index}")
+        self._write_asm_cmd("0;JMP")
 
     def write_arithmetic(self, cmd):
         if cmd == "add":
@@ -209,10 +228,10 @@ class CodeWriter:
         self._write_asm_cmd("M=M-1")
 
     def write_label(self, label):
-        self._write_asm_cmd(f"({self._build_asm_label(label)})")
+        self._write_asm_cmd(f"({self._build_asm_function_label(label)})")
 
     def write_goto(self, label):
-        self._write_asm_cmd(f"@{self._build_asm_label(label)}")
+        self._write_asm_cmd(f"@{self._build_asm_function_label(label)}")
         self._write_asm_cmd("0;JMP")
 
     def write_if(self, label):
@@ -220,46 +239,174 @@ class CodeWriter:
         self._write_asm_cmd("M=M-1")
         self._write_asm_cmd("A=M")
         self._write_asm_cmd("D=M")
-        self._write_asm_cmd(f"@{self._build_asm_label(label)}")
+        self._write_asm_cmd(f"@{self._build_asm_function_label(label)}")
         self._write_asm_cmd("D;JNE")
+
+    def write_call(self, name, nb_args):
+        # push return address
+        return_label = f"RET_{self._asm_cmd_index}"
+        self._write_asm_cmd(f"@{return_label}")
+        self._write_asm_cmd("D=A")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("A=M")
+        self._write_asm_cmd("M=D")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=M+1")
+
+        # push memory segments
+        def _save_segment(segment):
+            self._write_asm_cmd(f"@{segment}")
+            self._write_asm_cmd("D=M")
+            self._write_asm_cmd("@SP")
+            self._write_asm_cmd("A=M")
+            self._write_asm_cmd("M=D")
+            self._write_asm_cmd("@SP")
+            self._write_asm_cmd("M=M+1")
+
+        _save_segment("LCL")
+        _save_segment("ARG")
+        _save_segment("THIS")
+        _save_segment("THAT")
+        # ARG = SP - n - 5
+        self._write_asm_cmd(f"@{nb_args}")
+        self._write_asm_cmd("D=A")
+        self._write_asm_cmd("@5")
+        self._write_asm_cmd("D=D+A")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("D=M-D")
+        self._write_asm_cmd("@ARG")
+        self._write_asm_cmd("M=D")
+        # LCL = SP
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("D=M")
+        self._write_asm_cmd("@LCL")
+        self._write_asm_cmd("M=D")
+
+        # jump to function
+        self._write_asm_cmd(f"@{name}")
+        self._write_asm_cmd("0;JMP")
+        # set return label
+        self._write_asm_cmd(f"({return_label})")
+
+    def write_function(self, name, nb_locals):
+        self._current_function_name = name
+        self._write_asm_cmd(f"({name})")
+        for _ in range(nb_locals):
+            self._write_push("constant", 0)
+
+    def write_return(self):
+        # FRAME = LCL (stored in R14)
+        self._write_asm_cmd("@LCL")
+        self._write_asm_cmd("D=M")
+        self._write_asm_cmd("@R14")
+        self._write_asm_cmd("M=D")
+        # RET = *(FRAME - 5) (stored in R15)
+        self._write_asm_cmd("@5")
+        self._write_asm_cmd("D=A")
+        self._write_asm_cmd("@R14")
+        self._write_asm_cmd("D=M-D")
+        self._write_asm_cmd("A=D")
+        self._write_asm_cmd("D=M")
+        self._write_asm_cmd("@R15")
+        self._write_asm_cmd("M=D")
+        # *ARG = POP()
+        self._write_pop("argument", 0)
+        # SP = ARG + 1
+        self._write_asm_cmd("@ARG")
+        self._write_asm_cmd("D=M+1")
+        self._write_asm_cmd("@SP")
+        self._write_asm_cmd("M=D")
+
+        # restore segments from caller
+        def _restore_from_caller(segment):
+            self._write_asm_cmd("@R14")
+            self._write_asm_cmd("M=M-1")
+            self._write_asm_cmd("A=M")
+            self._write_asm_cmd("D=M")
+            self._write_asm_cmd(f"@{segment}")
+            self._write_asm_cmd("M=D")
+
+        _restore_from_caller("THAT")
+        _restore_from_caller("THIS")
+        _restore_from_caller("ARG")
+        _restore_from_caller("LCL")
+        # GOTO RET
+        self._write_asm_cmd("@R15")
+        self._write_asm_cmd("A=M")
+        self._write_asm_cmd("0;JMP")
 
     def _write_asm_cmd(self, cmd):
         self._stream.write(f"{cmd}\n")
+        self._asm_cmd_index += 1
 
-    def _build_asm_label(self, label):
-        return f"{self._current_function}${label}"
+    def _build_asm_function_label(self, label):
+        return f"{self._current_function_name}${label}"
+
+    def write_comment(self, comment):
+        self._stream.write(f"// {comment}\n")
 
     def close(self):
         self._stream.close()
 
 
 if __name__ == "__main__":
-    filename = sys.argv[1]
-    with open(filename) as input_file:
-        parser = Parser(input_file)
-    filename_prefix = filename.split(".")[0]
-    output_filename = filename_prefix + ".asm"
+    arg = sys.argv[1]
+    if os.path.isfile(arg):
+        filenames = [arg]
+        output_filename = arg.split(".")[0] + ".asm"
+    elif os.path.isdir(arg):
+        filenames = [
+            os.path.join(arg, fn) for fn in os.listdir(arg) if fn.endswith(".vm")
+        ]
+        output_filename = os.path.join(
+            arg, os.path.split(arg.strip(os.sep))[1] + ".asm"
+        )
+    else:
+        print("file not found")
+        sys.exit(1)
+    if len(filenames) == 0:
+        print("no vm file found in this folder")
+        sys.exit(1)
+
+    parsers = []
+    for fn in filenames:
+        with open(fn) as input_file:
+            parsers.append(Parser(input_file))
+
     output_file = open(output_filename, "w")
     code_writer = CodeWriter(output_file)
-    # TODO: use path lib
-    code_writer.set_filename(filename_prefix.split("/")[-1])
-    while parser.has_more_commands():
-        parser.advance()
-        cmd_type = parser.command_type()
-        if cmd_type == "C_ARITHMETIC":
-            code_writer.write_arithmetic(parser.current_command)
-        elif cmd_type in ["C_PUSH", "C_POP"]:
-            segment = parser.arg1()
-            index = parser.arg2()
-            code_writer.write_push_pop(cmd_type, segment, index)
-        elif cmd_type == "C_LABEL":
-            label = parser.arg1()
-            code_writer.write_label(label)
-        elif cmd_type == "C_GOTO":
-            label = parser.arg1()
-            code_writer.write_goto(label)
-        elif cmd_type == "C_IF":
-            label = parser.arg1()
-            code_writer.write_if(label)
+    if not (len(sys.argv) > 2 and sys.argv[2] == "no_bootstrap"):
+        code_writer.write_bootstrap_code()
+    for parser, fn in zip(parsers, filenames):
+        code_writer.set_filename(os.path.split(fn)[1].split(".")[0])
+        while parser.has_more_commands():
+            parser.advance()
+            code_writer.write_comment(parser.current_command)
+            cmd_type = parser.command_type()
+            if cmd_type == "C_ARITHMETIC":
+                code_writer.write_arithmetic(parser.current_command)
+            elif cmd_type in ["C_PUSH", "C_POP"]:
+                segment = parser.arg1()
+                index = parser.arg2()
+                code_writer.write_push_pop(cmd_type, segment, index)
+            elif cmd_type == "C_LABEL":
+                label = parser.arg1()
+                code_writer.write_label(label)
+            elif cmd_type == "C_GOTO":
+                label = parser.arg1()
+                code_writer.write_goto(label)
+            elif cmd_type == "C_IF":
+                label = parser.arg1()
+                code_writer.write_if(label)
+            elif cmd_type == "C_CALL":
+                name = parser.arg1()
+                nb_args = parser.arg2()
+                code_writer.write_call(name, nb_args)
+            elif cmd_type == "C_FUNCTION":
+                name = parser.arg1()
+                nb_locals = parser.arg2()
+                code_writer.write_function(name, nb_locals)
+            elif cmd_type == "C_RETURN":
+                code_writer.write_return()
 
     code_writer.close()
