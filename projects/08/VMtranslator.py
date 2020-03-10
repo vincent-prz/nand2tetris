@@ -337,7 +337,9 @@ class CodeWriter:
 
     def _write_asm_cmd(self, cmd):
         self._stream.write(f"{cmd}\n")
-        self._asm_cmd_index += 1
+        # labels will not be removed by assembler, so we must not count them
+        if not cmd.startswith("("):
+            self._asm_cmd_index += 1
 
     def _build_asm_function_label(self, label):
         return f"{self._current_function_name}${label}"
@@ -376,9 +378,11 @@ if __name__ == "__main__":
     output_file = open(output_filename, "w")
     code_writer = CodeWriter(output_file)
     if not (len(sys.argv) > 2 and sys.argv[2] == "no_bootstrap"):
+        code_writer.write_comment(f"bootstrap")
         code_writer.write_bootstrap_code()
     for parser, fn in zip(parsers, filenames):
         code_writer.set_filename(os.path.split(fn)[1].split(".")[0])
+        code_writer.write_comment(f"file {fn}")
         while parser.has_more_commands():
             parser.advance()
             code_writer.write_comment(parser.current_command)
