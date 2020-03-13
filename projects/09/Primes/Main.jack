@@ -1,0 +1,16 @@
+class Main {
+    function void main() {
+	var int i, n;
+	var Array primes;
+	let i = 0;
+
+	let n = Keyboard.readInt("How many primes do you want ?");
+	let primes = Primes.primes(n);
+	while (i < n) {
+	    do Output.printInt(primes[i]);
+	    do Output.printChar(" ");
+	    let i = i + 1;
+	}
+	return;
+    }
+}
