@@ -11,28 +11,19 @@ def get_output_filename(output_folder, input_filename):
     return os.path.join(output_folder, output_basename)
 
 
-# def prettify_tokentree(tree_dump):
-#     lines = []
-#     first, rest = tree_dump.split("<tokens>")
-#     lines.append(first)
-#     str_buffer = rest
-#     while not str_buffer.startswith("</tokens>"):
-#         import pdb; pdb.set_trace()
-#         m = re.match(r"<.*> .* </.*>", str_buffer)
-#         lines.append(m.group(0))
-#         str_buffer = str_buffer.lstrip(m.group(0))
-# 
-#     lines.append("</tokens>")
-#     return "\n".join(lines)
-
 def etree_toprettystring(tree):
     str_buffer = f"<{tree.tag}>"
     if len(tree) == 0:
-        str_buffer += tree.text.replace("<", "&lt;").replace(">", "&gt;")
+        str_buffer += (
+            tree.text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
     else:
-        str_buffer += "\n" + "\n".join(etree_toprettystring(elem) for elem in tree) +"\n"
+        str_buffer += (
+            "\n" + "\n".join(etree_toprettystring(elem) for elem in tree) + "\n"
+        )
     str_buffer += f"</{tree.tag}>"
     return str_buffer
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -48,9 +39,7 @@ if __name__ == "__main__":
         help="Perform only the tokenization, and not the parsing.",
     )
     argparser.add_argument(
-        "--output-folder",
-        dest="output_folder",
-        help="Specify the output folder.",
+        "--output-folder", dest="output_folder", help="Specify the output folder.",
     )
     args = argparser.parse_args()
     input_arg = args.input_arg

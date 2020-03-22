@@ -6,15 +6,15 @@ NC='\033[0m' # No Color
 nb_failures=0
 
 test_folder=('ArrayTest' 'ExpressionLessSquare' 'Square')
-TOKENIZER_EXE="python jack_analyzer.py --tokenize-only --output-folder tmp"
+TOKENIZER_EXE="python jack_analyzer.py --tokenize-only --output-folder test_folder"
 
-mkdir tmp
+mkdir test_folder
 
 for test_folder in "${test_folder[@]}"; do
     for jack_file in $test_folder/*.jack; do
         $TOKENIZER_EXE $jack_file
         compare_file=${jack_file%.jack}T.xml
-        var_with_no_name=tmp${jack_file#$test_folder}
+        var_with_no_name=test_folder${jack_file#$test_folder}
         output_file=${var_with_no_name%.jack}.xml
         diff -w $compare_file $output_file > /dev/null
         if [[ $? -ne 0 ]]; then
@@ -27,7 +27,7 @@ for test_folder in "${test_folder[@]}"; do
     done
 done
 
-rm -rf tmp
+rm -rf test_folder
 
 
 if [[ $nb_failures -eq 0 ]]; then

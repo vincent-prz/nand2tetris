@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 import re
 from typing import Union
 
@@ -62,7 +63,7 @@ def parse_keyword(keyword, s):
 
 def parse_symbol(symbol, s):
     if s.startswith(symbol):
-        return Token("SYMBOL", symbol), s.lstrip(symbol)
+        return Token("SYMBOL", symbol), s[len(symbol) :]
 
 
 def parse_int_const(s):
@@ -85,38 +86,78 @@ def parse_identifier(s):
         return Token("IDENTIFIER", m.group(1)), s.lstrip(m.group(1))
 
 
+def many(parser):
+    def new_parser(s):
+        parsed = []
+        parse_result = parser(s)
+        while parse_result is not None:
+            parsed.append(parse_result[0])
+            s = parse_result[1]
+            parse_result = parser(s)
+
+        return parsed, s
+
+    return new_parser
+
+
+def alternative(*parsers):
+    def new_parser(s):
+        for p in parsers:
+            if (parse_result := p(s)) is not None:
+                return parse_result
+
+    return new_parser
+
+
+def chain_and_ignore_right(parser_left, parser_right):
+    def new_parser(s):
+        parse_result = parser_left(s)
+        if parse_result is None:
+            return None
+        parsed, s = parse_result
+
+        parse_result = parser_right(s)
+        if parse_result is None:
+            return None
+        _, s = parse_result
+        return parsed, s
+
+    return new_parser
+
+
 def parse_token(s):
+    parsers = []
     for kw in KEYWORDS:
-        parse_result = parse_keyword(kw, s)
-        if parse_result is not None:
-            return parse_result
+        parsers.append(partial(parse_keyword, kw))
 
     for symbol in SYMBOLS:
-        parse_result = parse_symbol(symbol, s)
-        if parse_result is not None:
-            return parse_result
+        parsers.append(partial(parse_symbol, symbol))
 
-    parse_result = parse_int_const(s) or parse_string_const(s) or parse_identifier(s)
-    return parse_result
+    parsers.append(parse_int_const)
+    parsers.append(parse_string_const)
+    parsers.append(parse_identifier)
+    return alternative(*parsers)(s)
+
+
+def parse_regex(regex, s, result=None):
+    if (m := re.match(regex, s)) is not None:
+        return result, s.lstrip(m.group(0))
 
 
 def parse_whitespace(s):
-    if (m := re.match(r"\s*", s)) is not None:
-        return None , s.lstrip(m.group(0))
-
-# def many(parser):
-#     def func(s):
-#         parsed = []
-#         parse_result = parser(s)
-#         while parse_result is not None:
-#             parsed.append(parse_result[0])
-#             parse_result = parser(parse_result[1])
-# 
-#         return result
-#     return func
+    return parse_regex(r"\s*", s, "WHITESPACE")
 
 
+def parse_comment(s):
+    return parse_regex(r"//.*", s, "COMMENT")
 
+
+def parse_start_multiline_comment(s):
+    return parse_regex(r"/\*\*.*", s, "START_ML_COMMENT")
+
+
+def parse_end_multiline_comment(s):
+    return parse_regex(r"\*/", s, "END_ML_COMMENT")
 
 
 class JackTokenizer:
@@ -127,34 +168,36 @@ class JackTokenizer:
         self._consume_file()
 
     def _consume_file(self):
-        multiline_comment = False
         with open(self.file_name) as stream:
+            multiline_comment = False
             for line_no, line in enumerate(stream.readlines()):
-                # remove left whitespace
-                line = line.lstrip()
-                # handle multiline comments
-                # if line.startswith("/**"):
-                #     multiline_comment = True
-                # elif line.startswith("*/"):
-                #     multiline_comment = False
-                # if multiline_comment:
-                #     continue
-
-                # ignore comment
-                str_buffer = line.split("//")[0].split("/**")[0]
-                parse_result = parse_token(str_buffer)
-                while parse_result is not None:
-                    token = parse_result[0]
-                    self._tokens.append(token)
-                    # remove whitespace
-                    parse_result = parse_whitespace(parse_result[1])
-                    str_buffer = parse_result[1]
-                    parse_result = parse_token(str_buffer)
-                if not (str_buffer.isspace() or str_buffer == ""):
-                    raise ValueError(
-                        f"Couldn't tokenize {repr(str_buffer)} at line {line_no + 1} in file {self.file_name}"
+                # remove left and whitespace
+                line = line.lstrip().rstrip()
+                # handling multiline comments
+                if line.startswith("/**"):
+                    if not line.endswith("*/"):
+                        multiline_comment = True
+                    continue
+                if line.endswith("*/"):
+                    multiline_comment = False
+                    continue
+                if multiline_comment:
+                    continue
+                parser = many(
+                    chain_and_ignore_right(
+                        alternative(parse_comment, parse_token), parse_whitespace
                     )
-
+                )
+                parse_result = parser(line)
+                tokens = parse_result[0]
+                if "COMMENT" in tokens:
+                    tokens = tokens[: tokens.index("COMMENT")]
+                self._tokens += tokens
+                remainder = parse_result[1]
+                if not (remainder.isspace() or remainder == ""):
+                    raise ValueError(
+                        f"Couldn't tokenize {repr(remainder)} at line {line_no + 1} in file {self.file_name}"
+                    )
 
     def has_more_tokens(self):
         return self._token_index < len(self._tokens) - 1
@@ -185,7 +228,9 @@ class JackTokenizer:
         current_token = self._current_token
         function_name = self.type_to_method_map[token_type]
         if current_token.token_type != token_type:
-            raise ValueError(f"Cannot get {function_name} for {current_token.token_type} token")
+            raise ValueError(
+                f"Cannot get {function_name} for {current_token.token_type} token"
+            )
         return current_token.value
 
     @property
