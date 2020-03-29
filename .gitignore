@@ -1,2 +1,4 @@
 *.out
 tools/bin/*.dat
+__pycache__
+.mypy_cache

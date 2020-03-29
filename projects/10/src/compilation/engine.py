@@ -14,19 +14,18 @@ class JackAST:
     node_type: str
     children: Union[LeafValue, List]
 
-    # def __repr__(self):
-    #     def rec_repr(jast:JackAST, indentation_level: int):
-    #         import pudb; pudb.set_trace()
-    #         result = 4 * indentation_level * " " + jast.node_type
-    #         if isinstance(jast.children, list) and len(jast.children) > 0:
-    #             result += "\n" + "\n".join(
-    #                 rec_repr(child, indentation_level + 1)
-    #                 for child in jast.children
-    #             )
-    #         else:
-    #             result += ": " + str(jast.children)
-    #         return result
-    #     return rec_repr(self, 0)
+    def __repr__(self):
+        def rec_repr(jast:JackAST, indentation_level: int):
+            result = 4 * indentation_level * " " + jast.node_type
+            if isinstance(jast.children, list) and len(jast.children) > 0:
+                result += "\n" + "\n".join(
+                    rec_repr(child, indentation_level + 1)
+                    for child in jast.children
+                )
+            else:
+                result += ": " + str(jast.children)
+            return result
+        return rec_repr(self, 0)
 
 
 def parse_kw_or_symbol(tok: Token, tokens: List[Token]) -> ParseResult:
@@ -43,14 +42,18 @@ def parse_identifier(tokens: List[Token]) -> ParseResult:
     return JackAST("IDENTIFIER", identifier.value), tokens[1:]
 
 
-# def flat_list(*elems) -> List:
-#     result = []
-#     for e in elems:
-#         if isinstance(e, list):
-#             result += e
-#         else:
-#             result.append(e)
-#     return result
+def flat_list(elems: List) -> List:
+    result = []
+    need_to_flatten = False
+    for e in elems:
+        if isinstance(e, list):
+            result += e
+            need_to_flatten = True
+        else:
+            result.append(e)
+    if need_to_flatten:
+        return flat_list(result)
+    return result
 
 
 def parse_class(tokens: List[Token]) -> ParseResult:
@@ -61,7 +64,7 @@ def parse_class(tokens: List[Token]) -> ParseResult:
         many(parse_class_var_dec),
         many(parse_subroutine_dec),
         partial(parse_kw_or_symbol, Token("SYMBOL", "}")),
-        aggregator=lambda *jasts: JackAST("CLASS", list(jasts)),
+        aggregator=lambda *jasts: JackAST("CLASS", flat_list(jasts)),
     )(tokens)
 
 
@@ -75,11 +78,12 @@ def parse_class_var_dec(tokens: List[Token]) -> ParseResult:
         parse_identifier,
         many(
             sequence(
-                partial(parse_kw_or_symbol, Token("SYMBOL", ",")), parse_identifier
+                partial(parse_kw_or_symbol, Token("SYMBOL", ",")),
+                parse_identifier,
             )
         ),
         partial(parse_kw_or_symbol, Token("SYMBOL", ";")),
-        aggregator=lambda *jasts: JackAST("CLASS_VAR_DEC", list(jasts)),
+        aggregator=lambda *jasts: JackAST("CLASS_VAR_DEC", flat_list(jasts)),
     )(tokens)
 
 
