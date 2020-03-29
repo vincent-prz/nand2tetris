@@ -3,6 +3,8 @@ from functools import partial
 import re
 from typing import Union
 
+from tokenizer.parsing_lib import *
+
 
 KEYWORDS = [
     "class",
@@ -84,45 +86,6 @@ def parse_string_const(s):
 def parse_identifier(s):
     if (m := re.match(r"([a-zA-Z_]\w*)", s)) is not None:
         return Token("IDENTIFIER", m.group(1)), s.lstrip(m.group(1))
-
-
-def many(parser):
-    def new_parser(s):
-        parsed = []
-        parse_result = parser(s)
-        while parse_result is not None:
-            parsed.append(parse_result[0])
-            s = parse_result[1]
-            parse_result = parser(s)
-
-        return parsed, s
-
-    return new_parser
-
-
-def alternative(*parsers):
-    def new_parser(s):
-        for p in parsers:
-            if (parse_result := p(s)) is not None:
-                return parse_result
-
-    return new_parser
-
-
-def chain_and_ignore_right(parser_left, parser_right):
-    def new_parser(s):
-        parse_result = parser_left(s)
-        if parse_result is None:
-            return None
-        parsed, s = parse_result
-
-        parse_result = parser_right(s)
-        if parse_result is None:
-            return None
-        _, s = parse_result
-        return parsed, s
-
-    return new_parser
 
 
 def parse_token(s):
@@ -223,6 +186,13 @@ class JackTokenizer:
 
     def string_val(self):
         return self._get_val("STRING_CONST")
+
+    def get_tokens(self):
+        result = []
+        while self.has_more_tokens():
+            self.advance()
+            result.append(self._current_token)
+        return result
 
     def _get_val(self, token_type):
         current_token = self._current_token

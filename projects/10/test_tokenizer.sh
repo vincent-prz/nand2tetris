@@ -6,7 +6,7 @@ NC='\033[0m' # No Color
 nb_failures=0
 
 test_folder=('ArrayTest' 'ExpressionLessSquare' 'Square')
-TOKENIZER_EXE="python jack_analyzer.py --tokenize-only --output-folder test_folder"
+TOKENIZER_EXE="python src/jack_analyzer.py --tokenize-only --output-folder test_folder"
 
 mkdir test_folder
 
