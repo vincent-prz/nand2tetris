@@ -4,6 +4,7 @@ import re
 import xml.etree.cElementTree as ET
 
 from tokenizer.jack_tokenizer import JackTokenizer
+from compilation import compilation_engine
 
 
 def get_output_filename(output_folder, input_filename):
@@ -66,22 +67,26 @@ if __name__ == "__main__":
     args = argparser.parse_args()
     input_arg = args.input_arg
     if os.path.isfile(input_arg):
-        tokenizers = [JackTokenizer(input_arg)]
+        file_names = [input_arg]
         output_folder = args.output_folder or os.path.dirname(input_arg)
-
-    elif os.path.isfolder(input_arg):
-        tokenizers = []
+    else:
+        file_names = []
         for fn in os.listdir(input_arg):
             if fn.endswith(".jack"):
-                tokenizers.append(JackTokenizer(input_arg))
+                file_names.append(fn)
         output_folder = args.output_folder or args.input_arg
 
     tokenize_only = args.tokenize_only
-    for tkz in tokenizers:
+    for fn in file_names:
         if tokenize_only:
+            tkz = JackTokenizer(fn)
             root = tokenizer_to_xml(tkz)
             output = etree_toprettystring(root)
-        output_filename = get_output_filename(output_folder, tkz.file_name)
+        else:
+            output = str(compilation_engine(fn))
+            print(output)
+
+        output_filename = get_output_filename(output_folder, fn)
         with open(output_filename, "w") as output_stream:
             output_stream.write(output)
             output_stream.write("\n")

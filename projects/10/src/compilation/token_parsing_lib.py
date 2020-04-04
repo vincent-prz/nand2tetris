@@ -25,12 +25,22 @@ def sequence(*parser_funcs: ParserFunc, aggregator: Callable = None) -> ParserFu
 def many(p: ParserFunc) -> ParserFunc:
     def parser_func(tokens: List[Token]) -> ParseResult:
         parsed_items = []
-        parse_parsed_items = p(tokens)
-        while parse_parsed_items is not None:
-            parsed, tokens = parse_parsed_items
+        parse_result = p(tokens)
+        while parse_result is not None:
+            parsed, tokens = parse_result
             parsed_items.append(parsed)
-            parse_parsed_items = p(tokens)
+            parse_result = p(tokens)
         return parsed_items, tokens
+
+    return parser_func
+
+
+def zero_or_one(p: ParserFunc) -> ParserFunc:
+    def parser_func(tokens: List[Token]) -> ParseResult:
+        parse_result = p(tokens)
+        if parse_result is not None:
+            return parse_result
+        return None, tokens
 
     return parser_func
 
