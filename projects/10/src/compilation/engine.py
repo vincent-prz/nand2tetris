@@ -120,7 +120,8 @@ def parse_parameter_list(tokens: List[Token]) -> ParseResult:
                 )
             ),
             aggregator=lambda *jasts: JackAST("PARAMETER_LIST", flat_list(jasts)),
-        )
+        ),
+        default_value=JackAST("PARAMETER_LIST", []),
     )(tokens)
 
 

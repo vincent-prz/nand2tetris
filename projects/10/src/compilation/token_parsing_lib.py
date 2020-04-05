@@ -35,12 +35,12 @@ def many(p: ParserFunc) -> ParserFunc:
     return parser_func
 
 
-def zero_or_one(p: ParserFunc) -> ParserFunc:
+def zero_or_one(p: ParserFunc, default_value: Any = None) -> ParserFunc:
     def parser_func(tokens: List[Token]) -> ParseResult:
         parse_result = p(tokens)
         if parse_result is not None:
             return parse_result
-        return None, tokens
+        return default_value, tokens
 
     return parser_func
 
