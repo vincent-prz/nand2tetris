@@ -48,6 +48,20 @@ def parse_identifier(tokens: List[Token]) -> ParseResult:
     return JackAST("IDENTIFIER", identifier.value), tokens[1:]
 
 
+def parse_integer_constant(tokens: List[Token]) -> ParseResult:
+    if len(tokens) == 0 or tokens[0].token_type != "INT_CONST":
+        return None
+    const = tokens[0]
+    return JackAST("INTEGER_CONSTANT", const.value), tokens[1:]
+
+
+def parse_string_constant(tokens: List[Token]) -> ParseResult:
+    if len(tokens) == 0 or tokens[0].token_type != "STRING_CONST":
+        return None
+    const = tokens[0]
+    return JackAST("STRING_CONSTANT", const.value), tokens[1:]
+
+
 def flat_list(elems: Iterable) -> List:
     result = []
     need_to_flatten = False
@@ -116,7 +130,9 @@ def parse_parameter_list(tokens: List[Token]) -> ParseResult:
             parse_identifier,
             many(
                 sequence(
-                    partial(parse_kw_or_symbol, Token("SYMBOL", ",")), parse_identifier
+                    partial(parse_kw_or_symbol, Token("SYMBOL", ",")),
+                    parse_type,
+                    parse_identifier,
                 )
             ),
             aggregator=lambda *jasts: JackAST("PARAMETER_LIST", flat_list(jasts)),
@@ -247,7 +263,34 @@ def parse_return_statement(tokens: List[Token]) -> ParseResult:
 
 
 def parse_expression(tokens: List[Token]) -> ParseResult:
-    return parse_identifier(tokens)
+    return sequence(
+        parse_term,
+        many(sequence(parse_op, parse_term)),
+        aggregator=lambda *jasts: JackAST("EXPRESSION", flat_list(jasts)),
+    )(tokens)
+
+
+def parse_term(tokens: List[Token]) -> ParseResult:
+    return choice(
+        parse_integer_constant,
+        parse_string_constant,
+        parse_keyword_constant,
+        sequence(
+            parse_identifier,
+            partial(parse_kw_or_symbol, Token("SYMBOL", "[")),
+            parse_expression,
+            partial(parse_kw_or_symbol, Token("SYMBOL", "]")),
+        ),
+        parse_subroutine_call,
+        parse_identifier,
+        sequence(
+            partial(parse_kw_or_symbol, Token("SYMBOL", "(")),
+            parse_expression,
+            partial(parse_kw_or_symbol, Token("SYMBOL", ")")),
+        ),
+        sequence(parse_unary_op, parse_term),
+        callback=lambda jast: JackAST("TERM", flat_list([jast])),
+    )(tokens)
 
 
 def parse_subroutine_call(tokens: List[Token]) -> ParseResult:
@@ -268,7 +311,6 @@ def parse_subroutine_call(tokens: List[Token]) -> ParseResult:
                 partial(parse_kw_or_symbol, Token("SYMBOL", ")")),
             ),
         ),
-        aggregator=lambda *jasts: JackAST("SUBROUTINE_CALL", flat_list(jasts)),
     )(tokens)
 
 
@@ -286,6 +328,36 @@ def parse_expression_list(tokens: List[Token]) -> ParseResult:
             ),
         ),
         aggregator=lambda *jasts: JackAST("EXPRESSION_LIST", flat_list(jasts)),
+    )(tokens)
+
+
+def parse_op(tokens: List[Token]) -> ParseResult:
+    return choice(
+        partial(parse_kw_or_symbol, Token("SYMBOL", "+")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "-")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "*")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "/")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "&")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "|")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "<")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", ">")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "=")),
+    )(tokens)
+
+
+def parse_unary_op(tokens: List[Token]) -> ParseResult:
+    return choice(
+        partial(parse_kw_or_symbol, Token("SYMBOL", "-")),
+        partial(parse_kw_or_symbol, Token("SYMBOL", "~")),
+    )(tokens)
+
+
+def parse_keyword_constant(tokens: List[Token]) -> ParseResult:
+    return choice(
+        partial(parse_kw_or_symbol, Token("KEYWORD", "true")),
+        partial(parse_kw_or_symbol, Token("KEYWORD", "false")),
+        partial(parse_kw_or_symbol, Token("KEYWORD", "null")),
+        partial(parse_kw_or_symbol, Token("KEYWORD", "this")),
     )(tokens)
 
 

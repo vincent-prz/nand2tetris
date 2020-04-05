@@ -45,11 +45,14 @@ def zero_or_one(p: ParserFunc, default_value: Any = None) -> ParserFunc:
     return parser_func
 
 
-def choice(*parser_funcs: ParserFunc) -> ParserFunc:
+def choice(*parser_funcs: ParserFunc, callback: Callable = None) -> ParserFunc:
     def parser_func(tokens: List[Token]) -> ParseResult:
         for p in parser_funcs:
             parse_result = p(tokens)
             if parse_result is not None:
+                if callback is not None:
+                    parsed_item, tokens = parse_result
+                    return callback(parsed_item), tokens
                 return parse_result
         return None
 
