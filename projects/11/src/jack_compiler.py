@@ -60,9 +60,15 @@ def jack_ast_to_xml(jast, parent=None):
 
     tag = capital_to_snake_case(jast.node_type)
     if parent is None:
-        tree = ET.Element(tag)
+        tree = ET.Element(
+            tag, attrib=jast.attributes.to_dict() if jast.attributes is not None else {}
+        )
     else:
-        tree = ET.SubElement(parent, tag)
+        tree = ET.SubElement(
+            parent,
+            tag,
+            attrib=jast.attributes.to_dict() if jast.attributes is not None else {},
+        )
     if isinstance(jast.children, list):
         for c in jast.children:
             jack_ast_to_xml(c, tree)

@@ -5,6 +5,16 @@ from typing import Dict, NamedTuple, Optional
 Kind = Enum("Kind", "STATIC FIELD ARG VAR")
 
 
+def kind_to_str(kind: Kind) -> str:
+    if kind == Kind.STATIC:
+        return "static"
+    if kind == Kind.FIELD:
+        return "field"
+    if kind == Kind.ARG:
+        return "arg"
+    return "var"
+
+
 class SymbolTableValue(NamedTuple):
     typ: str
     kind: Kind
@@ -31,13 +41,14 @@ class SymbolTable:
         self._nb_per_kind[Kind.ARG] = 0
         self._nb_per_kind[Kind.VAR] = 0
 
-    def define(self, name: str, typ: str, kind: Kind) -> None:
+    def define(self, name: str, typ: str, kind: Kind) -> int:
         idx = self._nb_per_kind[kind]
         if kind in (Kind.STATIC, Kind.FIELD):
             self._class_scope[name] = SymbolTableValue(typ, kind, idx)
         else:
             self._subroutine_scope[name] = SymbolTableValue(typ, kind, idx)
         self._nb_per_kind[kind] = idx + 1
+        return idx
 
     def var_count(self, kind: Kind) -> int:
         return self._nb_per_kind[kind]

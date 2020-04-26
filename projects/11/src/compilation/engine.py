@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import List, Iterable, Optional, Union
+from typing import Any, Dict, List, Iterable, NamedTuple, Optional, Union
 
+from symbol_table import kind_to_str, Kind, SymbolTable
 from tokenizer.jack_tokenizer import JackTokenizer, Token
 from compilation.token_parsing_lib import (
     choice,
@@ -15,10 +16,26 @@ from compilation.token_parsing_lib import (
 LeafValue = Union[int, str]
 
 
+class ScopeAttributes(NamedTuple):
+    category: str
+    mode: str
+    kind: Optional[str] = None
+    idx: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"mode": self.mode, "category": self.category}
+        if self.kind is not None:
+            result["kind"] = self.kind
+        if self.idx is not None:
+            result["idx"] = self.idx
+        return result
+
+
 @dataclass
 class JackAST:
     node_type: str
     children: Union[LeafValue, List["JackAST"]]
+    attributes: Optional[ScopeAttributes] = None
 
     def __repr__(self):
         def rec_repr(jast: JackAST, indentation_level: int):
@@ -29,6 +46,8 @@ class JackAST:
                 )
             else:
                 result += ": " + str(jast.children)
+                if jast.attributes is not None:
+                    result += f" | {jast.attributes}"
             return result
 
         return rec_repr(self, 0)
@@ -361,12 +380,132 @@ def parse_keyword_constant(tokens: List[Token]) -> ParseResult:
     )(tokens)
 
 
+def add_scope_attributes(root: JackAST) -> None:
+    symbol_table = SymbolTable()
+    assert root.node_type == "CLASS"
+    assert isinstance(root.children, list)
+    identifier_tree = root.children[1]
+    assert identifier_tree.node_type == "IDENTIFIER"
+    identifier_tree.attributes = ScopeAttributes(category="class", mode="declaration")
+
+    class_var_decs = [
+        child for child in root.children if child.node_type == "CLASS_VAR_DEC"
+    ]
+    for vd in class_var_decs:
+        _add_var_dec_scope_attributes(vd, symbol_table)
+    subroutine_decs = [
+        child for child in root.children if child.node_type == "SUBROUTINE_DEC"
+    ]
+    for sd in subroutine_decs:
+        symbol_table.start_subroutine()
+        _add_subroutine_scope_attributes(sd, symbol_table)
+
+
+def _add_var_dec_scope_attributes(vd: JackAST, symbol_table: SymbolTable) -> None:
+    assert vd.node_type in ["CLASS_VAR_DEC", "VAR_DEC"]
+    assert isinstance(vd.children, list)
+    kind_str = vd.children[0].children
+    typ = vd.children[1].children
+    assert isinstance(kind_str, str)
+    assert isinstance(typ, str)
+    if kind_str == "static":
+        kind = Kind.STATIC
+    elif kind_str == "field":
+        kind = Kind.FIELD
+    elif kind_str == "var":
+        kind = Kind.VAR
+    child_index = 2
+    while child_index < len(vd.children):
+        # recall: syntax is '<kind> <type> <identifier> <separator>'
+        # eg 'static int x, field string s;'
+        identifier_tree = vd.children[child_index]
+        varname = identifier_tree.children
+        assert isinstance(varname, str)
+        var_idx = symbol_table.define(varname, typ, kind)
+        identifier_tree.attributes = ScopeAttributes(
+            category=kind_str, mode="declaration", kind=kind_str, idx=var_idx
+        )
+        child_index = child_index + 2
+
+
+def _add_subroutine_scope_attributes(jast: JackAST, symboltable: SymbolTable) -> None:
+    assert jast.node_type == "SUBROUTINE_DEC"
+    assert isinstance(jast.children, list)
+    identifier_tree = jast.children[2]
+    assert identifier_tree.node_type == "IDENTIFIER"
+    identifier_tree.attributes = ScopeAttributes(
+        category="subroutine", mode="declaration"
+    )
+    _add_parameter_list_scope_attributes(jast.children[4], symboltable)
+    _add_subroutine_body_scope_attributes(jast.children[6], symboltable)
+
+
+def _add_subroutine_body_scope_attributes(
+    jast: JackAST, symboltable: SymbolTable
+) -> None:
+    assert jast.node_type == "SUBROUTINE_BODY"
+    assert isinstance(jast.children, list)
+    var_decs = [child for child in jast.children if child.node_type == "VAR_DEC"]
+    for vd in var_decs:
+        _add_var_dec_scope_attributes(vd, symboltable)
+    root_statements = [
+        child for child in jast.children if child.node_type == "STATEMENTS"
+    ][0]
+    _add_statements_scope_attributes(root_statements, symboltable)
+
+
+def _add_parameter_list_scope_attributes(
+    jast: JackAST, symboltable: SymbolTable
+) -> None:
+    assert jast.node_type == "PARAMETER_LIST"
+    index = 0
+    assert isinstance(jast.children, list)
+    while index < len(jast.children):
+        typ = jast.children[index].children
+        identifier_tree = jast.children[index + 1]
+        name = identifier_tree.children
+        assert isinstance(name, str)
+        assert isinstance(typ, str)
+        arg_idx = symboltable.define(name, typ, Kind.ARG)
+        identifier_tree.attributes = ScopeAttributes(
+            category="arg", mode="declaration", kind="arg", idx=arg_idx
+        )
+        index = index + 3
+
+
+def _add_statements_scope_attributes(jast: JackAST, symboltable: SymbolTable) -> None:
+    """Recursively add scope attributes to identifiers used in statements."""
+
+    def rec_aux(jast: JackAST, symboltable: SymbolTable) -> None:
+        if jast.node_type == "IDENTIFIER":
+            assert isinstance(jast.children, str)
+            id_name = jast.children
+            if (kind := symboltable.kind_of(id_name)) is not None:
+                jast.attributes = ScopeAttributes(
+                    category=kind_to_str(kind),
+                    mode="usage",
+                    kind=kind_to_str(kind),
+                    idx=symboltable.index_of(id_name),
+                )
+        else:
+            if isinstance(jast.children, (int, str)):
+                return
+            for child in jast.children:
+                rec_aux(child, symboltable)
+
+    assert jast.node_type == "STATEMENTS"
+    assert isinstance(jast.children, list)
+    for child in jast.children:
+        rec_aux(child, symboltable)
+
+
 def compilation_engine(file_name: str) -> JackAST:
     tokenizer = JackTokenizer(file_name)
     parse_result = parse_class(tokenizer.get_tokens())
     if parse_result is None:
-        raise ValueError(f"Could not parse file")
+        raise ValueError(f"Could not parse file {file_name}")
     jast, remaining_tokens = parse_result
     if len(remaining_tokens):
         raise ValueError(f"Could not parse {remaining_tokens}")
+    add_scope_attributes(jast)
     return jast

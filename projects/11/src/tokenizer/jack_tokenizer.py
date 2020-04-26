@@ -60,7 +60,11 @@ class Token:
 
 def parse_keyword(keyword, s):
     if s.startswith(keyword):
-        return Token("KEYWORD", keyword), s.lstrip(keyword)
+        rest = s.lstrip(keyword)
+        # this condition is a hack to prevent an identifier such as 'double' to be parsed as two tokens
+        # 'do' and 'uble'
+        if len(rest) > 0 and not rest[0].isalnum():
+            return Token("KEYWORD", keyword), rest
 
 
 def parse_symbol(symbol, s):
