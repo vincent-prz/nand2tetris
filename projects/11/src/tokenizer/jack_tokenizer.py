@@ -93,7 +93,7 @@ def parse_identifier(s):
 
 
 def parse_token(s):
-    parsers = []
+    parsers: list = []
     for kw in KEYWORDS:
         parsers.append(partial(parse_keyword, kw))
 
