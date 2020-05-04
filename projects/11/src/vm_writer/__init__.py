@@ -54,7 +54,10 @@ class JackASTVisitor:
             assert isinstance(identifiers[0].children, str)
             assert isinstance(identifiers[1].children, str)
             called_func_name = f"{identifiers[0].children}.{identifiers[1].children}"
-        self.code.append(f"call {called_func_name}")
+        expression_list = [c for c in root.children if c.node_type == "EXPRESSION_LIST"][0]
+        assert isinstance(expression_list.children, list)
+        nb_args = len(expression_list.children)
+        self.code.append(f"call {called_func_name} {nb_args}")
 
     def visit_expression_list(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
@@ -86,8 +89,11 @@ class JackASTVisitor:
         if symbol == "+":
             self.code.append("add")
         elif symbol == "*":
-            self.code.append("mult")
+            self.code.append("call Math.multiply 2")
 
+
+    def visit_return_statement(self, root: JackAST) -> None:
+        self.code.append("return")
 
 def write_vm_code(root: JackAST) -> str:
     visitor = JackASTVisitor()

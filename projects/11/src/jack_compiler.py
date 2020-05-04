@@ -75,7 +75,7 @@ if __name__ == "__main__":
         file_names = []
         for fn in os.listdir(input_arg):
             if fn.endswith(".jack"):
-                file_names.append(fn)
+                file_names.append(os.path.join(input_arg, fn))
         output_folder = args.output_folder or args.input_arg
 
     tokenize_only = args.tokenize_only
