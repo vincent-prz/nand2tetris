@@ -7,11 +7,13 @@ class JackASTVisitor:
     class_name: str
     code: List[str]
     _current_subroutine_name: str
-    _current_unary_op: str
+    _current_if_label_idx: int
+    _current_while_label_idx: int
 
     def __init__(self):
         self.code = []
-        self._current_unary_op = ""
+        self._current_if_label_idx = 0
+        self._current_while_label_idx = 0
 
     def visit(self, root: JackAST) -> None:
         meth = getattr(self, f"visit_{root.node_type.lower()}", None)
@@ -51,14 +53,12 @@ class JackASTVisitor:
         )
         self.code.append(f"function {self._current_subroutine_name} {nb_local_vars}")
         statements = [c for c in root.children if c.node_type == "STATEMENTS"][0]
-        assert isinstance(statements.children, list)
-        for c in statements.children:
-            self.visit(c)
+        self.visit(statements)
 
-    # def visit_var_dec(self, root: JackAST) -> None:
-    #     assert isinstance(root.children, list)
-    #     identifiers = [c for c in root.children if c.node_type == "IDENTIFIER"]
-    #     pas
+    def visit_statements(self, root: JackAST) -> None:
+        assert isinstance(root.children, list)
+        for c in root.children:
+            self.visit(c)
 
     def visit_do_statement(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
@@ -82,9 +82,11 @@ class JackASTVisitor:
             [c for c in expression_list.children if c.node_type == "EXPRESSION"]
         )
         self.code.append(f"call {called_func_name} {nb_args}")
+        self.code.append(f"pop temp 0")  # NOTE: not sure where to pop
 
     def visit_let_statement(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
+        # first visit expression on the right hand side
         expression = [c for c in root.children if c.node_type == "EXPRESSION"][0]
         self.visit(expression)
 
@@ -93,10 +95,58 @@ class JackASTVisitor:
         assert identifier.attributes.mode == "usage"
         if identifier.attributes.kind == "var":
             memory_segment = "local"
+        elif identifier.attributes.kind == "arg":
+            memory_segment = "argument"
         else:
             raise ValueError("Unsupported variable kind")
         memory_idx = identifier.attributes.idx
         self.code.append(f"pop {memory_segment} {memory_idx}")
+
+    def visit_if_statement(self, root: JackAST) -> None:
+        assert isinstance(root.children, list)
+        # first visit expression in condition
+        expression = [c for c in root.children if c.node_type == "EXPRESSION"][0]
+        self.visit(expression)
+        # negate condition
+        self.code.append("not")
+
+        # if ~cond goto else
+        # vm code for if
+        self.code.append(f"if-goto L_IF_{self._current_if_label_idx}_ELSE")
+        statement_groups = [c for c in root.children if c.node_type == "STATEMENTS"]
+        assert len(statement_groups) <= 2
+        if len(statement_groups) == 0:
+            return
+        self.visit(statement_groups[0])
+        self.code.append(f"goto L_IF_{self._current_if_label_idx}_ENDIF")
+
+        # vm code for else
+        self.code.append(f"label L_IF_{self._current_if_label_idx}_ELSE")
+        if len(statement_groups) == 2:
+            self.visit(statement_groups[1])
+        self.code.append(f"label L_IF_{self._current_if_label_idx}_ENDIF")
+        self._current_if_label_idx += 1
+
+    def visit_while_statement(self, root: JackAST) -> None:
+        assert isinstance(root.children, list)
+        self.code.append(f"label L_WHILE_{self._current_while_label_idx}_START")
+
+        # first visit expression in condition
+        expression = [c for c in root.children if c.node_type == "EXPRESSION"][0]
+        self.visit(expression)
+        # negate condition
+        self.code.append("not")
+
+        # if ~cond goto endwhile
+        # vm code for while body
+        self.code.append(f"if-goto L_WHILE_{self._current_while_label_idx}_END")
+        statement_groups = [c for c in root.children if c.node_type == "STATEMENTS"]
+        assert len(statement_groups) == 1
+        self.visit(statement_groups[0])
+        self.code.append(f"goto L_WHILE_{self._current_while_label_idx}_START")
+
+        # end while
+        self.code.append(f"label L_WHILE_{self._current_while_label_idx}_END")
 
     def visit_expression_list(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
@@ -118,8 +168,10 @@ class JackASTVisitor:
         term = root.children[0]
         if term.node_type == "INTEGER_CONSTANT":
             assert isinstance(term.children, int)
-            self.code.append(f"push constant {self._current_unary_op}{term.children}")
-        # subroutine call case, we cam reuse the same visitor as do statement
+            self.code.append(f"push constant {term.children}")
+        # subroutine call case, we can reuse the same visitor as do statement
+        elif term.node_type == "KEYWORD":
+            self.visit(term)
         elif term.node_type == "IDENTIFIER" and len(root.children) > 1:
             self.visit_do_statement(root)
         elif term.node_type == "IDENTIFIER":
@@ -128,18 +180,25 @@ class JackASTVisitor:
             assert term.attributes.mode == "usage"
             if term.attributes.kind == "var":
                 memory_segment = "local"
+            elif term.attributes.kind == "arg":
+                memory_segment = "argument"
             else:
                 raise ValueError("Unsupported variable kind")
             memory_idx = term.attributes.idx
             self.code.append(f"push {memory_segment} {memory_idx}")
         elif term.node_type == "SYMBOL" and term.children in ["-", "~"]:
-            self._current_unary_op = term.children
+            unary_symbol = term.children
+            assert isinstance(unary_symbol, str)
             self.visit(root.children[1])
-            self._current_unary_op = ""
+            if unary_symbol == "-":
+                self.code.append("neg")
+            elif unary_symbol == "~":
+                self.code.append("not")
         else:  # term of the form [expression] or (expression)
             self.visit(root.children[1])
 
     def visit_symbol(self, root: JackAST) -> None:
+        """Should only be called inside expressions."""
         assert isinstance(root.children, str)
         symbol = root.children
         if symbol == "+":
@@ -148,8 +207,31 @@ class JackASTVisitor:
             self.code.append("call Math.multiply 2")
         elif symbol == "-":
             self.code.append("sub")
+        elif symbol == "=":
+            self.code.append("eq")
+        elif symbol == "<":
+            self.code.append("lt")
+        elif symbol == ">":
+            self.code.append("gt")
+
+    def visit_keyword(self, root: JackAST) -> None:
+        """Should only be called inside expressions."""
+        keyword = root.children
+        assert isinstance(keyword, str)
+        if keyword == "true":
+            self.code.append("push constant 1")
+            self.code.append("neg")
+        elif keyword == "false":
+            self.code.append("push constant 0")
 
     def visit_return_statement(self, root: JackAST) -> None:
+        assert isinstance(root.children, list)
+        expressions = [c for c in root.children if c.node_type == "EXPRESSION"]
+        assert len(expressions) <= 1
+        if len(expressions) == 1:
+            self.visit(expressions[0])
+        else:
+            self.code.append("push constant 0")
         self.code.append("return")
 
 
