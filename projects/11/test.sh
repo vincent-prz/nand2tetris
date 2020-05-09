@@ -4,7 +4,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 nb_failures=0
 
-input_folders=('Seven')
+input_folders=('Seven' 'ConvertToBin')
 ref_folder=test_refs
 
 COMPILER_EXE="python src/jack_compiler.py --output-folder test_folder"
@@ -16,7 +16,6 @@ for folder in "${input_folders[@]}"; do
     $COMPILER_EXE $folder
     for jack_file in $folder/*.jack; do
         jack_file_wo_prefix=${jack_file#${folder}/}
-        echo $jack_file_wo_prefix
         compare_file=${ref_folder}/${jack_file%.jack}.vm
         output_file=${test_folder}/${jack_file_wo_prefix%.jack}.vm
         diff -w $compare_file $output_file > /dev/null
