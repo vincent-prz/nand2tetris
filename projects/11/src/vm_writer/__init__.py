@@ -95,7 +95,7 @@ class JackASTVisitor:
         # case of call on a method of the current class, need to push `this`
         if len(identifiers) == 1:
             assert isinstance(identifiers[0].children, str)
-            called_func_name = identifiers[0].children
+            called_func_name = f"{self._class_name}.{identifiers[0].children}"
             is_method_call = True
             self.code.append("push pointer 0")
         else:  # call of the form <varname>.<subroutine>
