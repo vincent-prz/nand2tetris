@@ -19,6 +19,7 @@ LeafValue = Union[int, str]
 class ScopeAttributes(NamedTuple):
     category: str
     mode: str
+    typ: Optional[str] = None
     kind: Optional[str] = None
     idx: Optional[int] = None
 
@@ -28,6 +29,8 @@ class ScopeAttributes(NamedTuple):
             result["kind"] = self.kind
         if self.idx is not None:
             result["idx"] = self.idx
+        if self.typ is not None:
+            result["typ"] = self.typ
         return result
 
 
@@ -397,7 +400,10 @@ def add_scope_attributes(root: JackAST) -> None:
         child for child in root.children if child.node_type == "SUBROUTINE_DEC"
     ]
     for sd in subroutine_decs:
-        symbol_table.start_subroutine()
+        assert isinstance(sd.children, list)
+        sd_type = sd.children[0].children
+        is_method = sd_type == "method"
+        symbol_table.start_subroutine(is_method)
         _add_subroutine_scope_attributes(sd, symbol_table)
 
 
@@ -423,7 +429,7 @@ def _add_var_dec_scope_attributes(vd: JackAST, symbol_table: SymbolTable) -> Non
         assert isinstance(varname, str)
         var_idx = symbol_table.define(varname, typ, kind)
         identifier_tree.attributes = ScopeAttributes(
-            category=kind_str, mode="declaration", kind=kind_str, idx=var_idx
+            category=kind_str, mode="declaration", typ=typ, kind=kind_str, idx=var_idx
         )
         child_index = child_index + 2
 
@@ -468,7 +474,7 @@ def _add_parameter_list_scope_attributes(
         assert isinstance(typ, str)
         arg_idx = symboltable.define(name, typ, Kind.ARG)
         identifier_tree.attributes = ScopeAttributes(
-            category="arg", mode="declaration", kind="arg", idx=arg_idx
+            category="arg", mode="declaration", kind="arg", typ=typ, idx=arg_idx
         )
         index = index + 3
 
@@ -481,9 +487,11 @@ def _add_statements_scope_attributes(jast: JackAST, symboltable: SymbolTable) ->
             assert isinstance(jast.children, str)
             id_name = jast.children
             if (kind := symboltable.kind_of(id_name)) is not None:
+                typ = symboltable.type_of(id_name)
                 jast.attributes = ScopeAttributes(
                     category=kind_to_str(kind),
                     mode="usage",
+                    typ=typ,
                     kind=kind_to_str(kind),
                     idx=symboltable.index_of(id_name),
                 )

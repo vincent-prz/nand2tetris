@@ -1,57 +1,79 @@
-from typing import List
+from typing import Dict, List
 from jack_ast import JackAST
 
 
 class JackASTVisitor:
 
-    class_name: str
+    _class_name: str
+    _class_nb_fields: int
     code: List[str]
     _current_subroutine_name: str
+    _current_subroutine_type: str
     _current_if_label_idx: int
     _current_while_label_idx: int
+    _memory_segment_map: Dict[str, str]
 
     def __init__(self):
         self.code = []
         self._current_if_label_idx = 0
         self._current_while_label_idx = 0
+        self._memory_segment_map = {
+            "var": "local",
+            "arg": "argument",
+            "field": "this",
+        }
 
     def visit(self, root: JackAST) -> None:
         meth = getattr(self, f"visit_{root.node_type.lower()}", None)
         if meth is not None:
             meth(root)
-        # if isinstance(root.children, list):
-        #     for c in root.children:
-        #         self.visit(c)
 
     def visit_class(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
         identifier = root.children[1]
         assert isinstance(identifier.children, str)
-        self.class_name = identifier.children
+        self._class_name = identifier.children
+        self._class_nb_fields = 0
         for c in root.children:
             self.visit(c)
 
+    def visit_class_var_dec(self, root: JackAST) -> None:
+        assert isinstance(root.children, list)
+        dec_type = root.children[0]
+        if dec_type.children == "field":
+            self._class_nb_fields += len(
+                [c for c in root.children if c.children == ","]
+            ) + 1
+
     def visit_subroutine_dec(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
+        keyword = root.children[0]
+        assert isinstance(keyword.children, str)
         identifier = root.children[2]
         assert isinstance(identifier.children, str)
-        self._current_subroutine_name = f"{self.class_name}.{identifier.children}"
-        # self.code.append(f"function {function_name} {len(parameter_list.children)}")
+        self._current_subroutine_name = f"{self._class_name}.{identifier.children}"
+        self._current_subroutine_type = keyword.children
         for c in root.children:
             self.visit(c)
 
     def visit_subroutine_body(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
-        nb_local_vars = len(
-            [
-                id
-                for c in root.children
-                if c.node_type == "VAR_DEC" and isinstance(c.children, list)
-                for id in c.children
-                if id.node_type == "IDENTIFIER"
-            ]
+        nb_local_vars = sum(
+            len([_ for _ in c.children if _.children == ","]) + 1
+            for c in root.children
+            if c.node_type == "VAR_DEC" and isinstance(c.children, list)
         )
         self.code.append(f"function {self._current_subroutine_name} {nb_local_vars}")
+
+        # allocate memory for constructors
+        if self._current_subroutine_type == "constructor":
+            self.code.append(f"push constant {self._class_nb_fields}")
+            self.code.append("call Memory.alloc 1")
+            self.code.append("pop pointer 0")
+        # setting `this` for methods`
+        elif self._current_subroutine_type == "method":
+            self.code.append("push argument 0")
+            self.code.append("pop pointer 0")
         statements = [c for c in root.children if c.node_type == "STATEMENTS"][0]
         self.visit(statements)
 
@@ -68,18 +90,34 @@ class JackASTVisitor:
 
     def _process_subroutine_call(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
-        # visit arguments expressions
-        for c in root.children:
-            self.visit(c)
         identifiers = [c for c in root.children if c.node_type == "IDENTIFIER"]
+        is_method_call = False
+        # case of call on a method of the current class, need to push `this`
         if len(identifiers) == 1:
             assert isinstance(identifiers[0].children, str)
             called_func_name = identifiers[0].children
-        else:
+            is_method_call = True
+            self.code.append("push pointer 0")
+        else:  # call of the form <varname>.<subroutine>
             assert len(identifiers) == 2
             assert isinstance(identifiers[0].children, str)
-            assert isinstance(identifiers[1].children, str)
-            called_func_name = f"{identifiers[0].children}.{identifiers[1].children}"
+            # case of a method call of the form <obj_name>.<routine>
+            if identifiers[0].attributes is not None:
+                is_method_call = True
+                kind = identifiers[0].attributes.kind
+                assert kind is not None
+                memory_segment = self._memory_segment_map[kind]
+                idx = identifiers[0].attributes.idx
+                typ = identifiers[0].attributes.typ
+                self.code.append(f"push {memory_segment} {idx}")
+                called_func_name = f"{typ}.{identifiers[1].children}"
+            # case of a plain function call
+            else:
+                called_func_name = f"{identifiers[0].children}.{identifiers[1].children}"
+
+        # pushing explicit arguments
+        for c in root.children:
+            self.visit(c)
         expression_list = [
             c for c in root.children if c.node_type == "EXPRESSION_LIST"
         ][0]
@@ -87,6 +125,8 @@ class JackASTVisitor:
         nb_args = len(
             [c for c in expression_list.children if c.node_type == "EXPRESSION"]
         )
+        if is_method_call:
+            nb_args += 1
         self.code.append(f"call {called_func_name} {nb_args}")
 
     def visit_let_statement(self, root: JackAST) -> None:
@@ -98,12 +138,9 @@ class JackASTVisitor:
         identifier = root.children[1]
         assert identifier.attributes is not None
         assert identifier.attributes.mode == "usage"
-        if identifier.attributes.kind == "var":
-            memory_segment = "local"
-        elif identifier.attributes.kind == "arg":
-            memory_segment = "argument"
-        else:
-            raise ValueError("Unsupported variable kind")
+        kind = identifier.attributes.kind
+        assert kind is not None
+        memory_segment = self._memory_segment_map[kind]
         memory_idx = identifier.attributes.idx
         self.code.append(f"pop {memory_segment} {memory_idx}")
 
@@ -186,12 +223,9 @@ class JackASTVisitor:
             assert isinstance(term.children, str)
             assert term.attributes is not None
             assert term.attributes.mode == "usage"
-            if term.attributes.kind == "var":
-                memory_segment = "local"
-            elif term.attributes.kind == "arg":
-                memory_segment = "argument"
-            else:
-                raise ValueError("Unsupported variable kind")
+            kind = term.attributes.kind
+            assert kind is not None
+            memory_segment = self._memory_segment_map[kind]
             memory_idx = term.attributes.idx
             self.code.append(f"push {memory_segment} {memory_idx}")
         elif term.node_type == "SYMBOL" and term.children in ["-", "~"]:
@@ -233,6 +267,8 @@ class JackASTVisitor:
             self.code.append("neg")
         elif keyword == "false":
             self.code.append("push constant 0")
+        elif keyword == "this":
+            self.code.append("push pointer 0")
 
     def visit_return_statement(self, root: JackAST) -> None:
         assert isinstance(root.children, list)

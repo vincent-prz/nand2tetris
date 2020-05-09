@@ -36,9 +36,10 @@ class SymbolTable:
             Kind.VAR: 0,
         }
 
-    def start_subroutine(self) -> None:
+    def start_subroutine(self, is_method: bool) -> None:
         self._subroutine_scope = {}
-        self._nb_per_kind[Kind.ARG] = 0
+        # argument 0 corresponds to `this` for methods
+        self._nb_per_kind[Kind.ARG] = 1 if is_method else 0
         self._nb_per_kind[Kind.VAR] = 0
 
     def define(self, name: str, typ: str, kind: Kind) -> int:
