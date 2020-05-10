@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from jack_ast import JackAST
 
 
@@ -129,20 +129,70 @@ class JackASTVisitor:
             nb_args += 1
         self.code.append(f"call {called_func_name} {nb_args}")
 
+    def _process_array_access(self, root: JackAST) -> None:
+        assert isinstance(root.children, list)
+        identifier = root.children[0]
+        array_index_expr = [c for c in root.children if c.node_type == "EXPRESSION"][0]
+        self._fetch_array_value_at_index(identifier, array_index_expr)
+        self.code.append("push that 0")
+
+    def _fetch_array_value_at_index(self, identifier: JackAST, array_index_expr: JackAST) -> None:
+        """Set `that` to the right address."""
+        memory_segment, memory_idx = self._get_identifier_memory_info(identifier)
+        # first compute the address
+        self.code.append(f"push {memory_segment} {memory_idx}")
+        self.visit(array_index_expr)
+        self.code.append(f"add")
+        # then set `that` to this adress
+        self.code.append("pop pointer 1")
+
     def visit_let_statement(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
-        # first visit expression on the right hand side
-        expression = [c for c in root.children if c.node_type == "EXPRESSION"][0]
-        self.visit(expression)
+        expressions = [c for c in root.children if c.node_type == "EXPRESSION"]
+        assert 1 <= len(expressions) <= 2
+        # let of the form `let x = <expression>`
+        if len(expressions) == 1:
+            right_side_expr = expressions[0]
+            self._process_regular_let(root, right_side_expr)
+        # let of the form `let x[i] = <expression>`
+        else:
+            right_side_expr = expressions[1]
+            array_index_expr = expressions[0]
+            self._process_array_let(root, right_side_expr, array_index_expr)
+
+    def _process_regular_let(self, root: JackAST, right_side_expr: JackAST) -> None:
+        assert isinstance(root.children, list)
+        self.visit(right_side_expr)
 
         identifier = root.children[1]
+        memory_segment, memory_idx = self._get_identifier_memory_info(identifier)
+        self.code.append(f"pop {memory_segment} {memory_idx}")
+
+    def _process_array_let(self, root: JackAST, right_side_expr: JackAST,
+                           array_index_expr: JackAST) -> None:
+        # bar[array_index_expr] = <right_hand_expr>
+        assert isinstance(root.children, list)
+        # compute right_hand_expr
+        self.visit(right_side_expr)
+
+        # computing address where to write
+        identifier = root.children[1]
+        self._fetch_array_value_at_index(identifier, array_index_expr)
+
+        # finally writing the result, ie putting right_hand_expr, which is still
+        # on top of the stack, into bar[array_index_expr]
+        self.code.append("pop that 0")
+
+    def _get_identifier_memory_info(self, identifier: JackAST) -> Tuple[str, int]:
+        assert identifier.node_type == "IDENTIFIER"
         assert identifier.attributes is not None
         assert identifier.attributes.mode == "usage"
         kind = identifier.attributes.kind
         assert kind is not None
         memory_segment = self._memory_segment_map[kind]
         memory_idx = identifier.attributes.idx
-        self.code.append(f"pop {memory_segment} {memory_idx}")
+        assert memory_idx is not None
+        return memory_segment, memory_idx
 
     def visit_if_statement(self, root: JackAST) -> None:
         assert isinstance(root.children, list)
@@ -214,11 +264,25 @@ class JackASTVisitor:
         if term.node_type == "INTEGER_CONSTANT":
             assert isinstance(term.children, int)
             self.code.append(f"push constant {term.children}")
+        elif term.node_type == "STRING_CONSTANT":
+            str_value = term.children
+            assert isinstance(str_value, str)
+            self.code.append(f"push constant {len(str_value)}")
+            self.code.append("call String.new 1")
+            for c in str_value:
+                self.code.append(f"push constant {ord(c)}")
+                self.code.append("call String.appendChar 2")
         elif term.node_type == "KEYWORD":
             self.visit(term)
-        # subroutine call case
         elif term.node_type == "IDENTIFIER" and len(root.children) > 1:
-            self._process_subroutine_call(root)
+            # subroutine call case
+            if any(c.node_type == "SYMBOL" and c.children == "(" for c in root.children):
+                self._process_subroutine_call(root)
+            # array access case
+            elif any(c.node_type == "SYMBOL" and c.children == "[" for c in root.children):
+                self._process_array_access(root)
+            else:
+                raise ValueError("Unknown Term")
         elif term.node_type == "IDENTIFIER":
             assert isinstance(term.children, str)
             assert term.attributes is not None

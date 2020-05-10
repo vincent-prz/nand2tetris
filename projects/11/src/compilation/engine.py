@@ -12,10 +12,11 @@ def compilation_engine(file_name: str, debug: bool = False) -> str:
     if len(remaining_tokens):
         raise ValueError(f"Could not parse {remaining_tokens}")
     add_scope_attributes(jast)
-    vm_code = write_vm_code(jast)
     if debug:
         print("===AST===")
         print(jast)
+    vm_code = write_vm_code(jast)
+    if debug:
         print("===VM CODE===")
         print(vm_code)
     return vm_code
