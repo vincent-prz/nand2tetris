@@ -327,7 +327,7 @@ class JackASTVisitor:
         if keyword == "true":
             self.code.append("push constant 1")
             self.code.append("neg")
-        elif keyword == "false":
+        elif keyword in ["false", "null"]:
             self.code.append("push constant 0")
         elif keyword == "this":
             self.code.append("push pointer 0")
