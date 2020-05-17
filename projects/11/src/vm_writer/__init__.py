@@ -21,6 +21,7 @@ class JackASTVisitor:
             "var": "local",
             "arg": "argument",
             "field": "this",
+            "static": "static",
         }
 
     def visit(self, root: JackAST) -> None:
@@ -285,12 +286,7 @@ class JackASTVisitor:
                 raise ValueError("Unknown Term")
         elif term.node_type == "IDENTIFIER":
             assert isinstance(term.children, str)
-            assert term.attributes is not None
-            assert term.attributes.mode == "usage"
-            kind = term.attributes.kind
-            assert kind is not None
-            memory_segment = self._memory_segment_map[kind]
-            memory_idx = term.attributes.idx
+            memory_segment, memory_idx = self._get_identifier_memory_info(term)
             self.code.append(f"push {memory_segment} {memory_idx}")
         elif term.node_type == "SYMBOL" and term.children in ["-", "~"]:
             unary_symbol = term.children
