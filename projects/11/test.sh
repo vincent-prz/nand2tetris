@@ -4,7 +4,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 nb_failures=0
 
-input_folders=('Seven' 'ConvertToBin' 'Square')
+input_folders=('Seven' 'ConvertToBin' 'Square' 'Average')
 ref_folder=test_refs
 
 COMPILER_EXE="python src/jack_compiler.py --output-folder test_folder"

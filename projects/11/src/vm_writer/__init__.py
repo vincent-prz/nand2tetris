@@ -313,6 +313,8 @@ class JackASTVisitor:
             self.code.append("call Math.multiply 2")
         elif symbol == "-":
             self.code.append("sub")
+        elif symbol == "/":
+            self.code.append("call Math.divide 2")
         elif symbol == "=":
             self.code.append("eq")
         elif symbol == "<":
