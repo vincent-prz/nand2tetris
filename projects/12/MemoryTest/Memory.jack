@@ -1,0 +1,97 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/12/Memory.jack
+
+/**
+ * This library provides two services: direct access to the computer's main
+ * memory (RAM), and allocation and recycling of memory blocks. The Hack RAM
+ * consists of 32,768 words, each holding a 16-bit binary number.
+ */ 
+class Memory {
+
+    static Array memory;
+    static int heapBase, maxSize;
+    static Array freeList;
+
+    /** Initializes the class. */
+    function void init() {
+        let memory = 0;
+        let heapBase = 2048;
+        let maxSize = 16383 - 2048;
+        let freeList = heapBase;
+        let freeList[0] = maxSize;
+        let freeList[1] = null;
+        return;
+    }
+
+    /** Returns the RAM value at the given address. */
+    function int peek(int address) {
+        return memory[address];
+    }
+
+    /** Sets the RAM value at the given address to the given value. */
+    function void poke(int address, int value) {
+        let memory[address] = value;
+        return;
+    }
+
+    /** Finds an available RAM block of the given size and returns
+     *  a reference to its base address. */
+    function int alloc(int size) {
+        var int bestLength, newBlockAddress;
+        var Array bestSegment, prevOfBestSegment, prevSegment, currentSegment;
+        let bestLength = maxSize + 1;
+        let prevOfBestSegment = null;
+        let prevSegment = null;
+        let bestSegment = null;
+        let currentSegment = freeList;
+        // find best fit
+        while (~(currentSegment = null)) {
+            if((currentSegment[0] > size) & (currentSegment[0] < bestLength)) {
+                let bestSegment = currentSegment;
+                let bestLength = currentSegment[0];
+                let prevOfBestSegment = prevSegment;
+            }
+            let prevSegment = currentSegment;
+            let currentSegment = currentSegment[1];
+        }
+        // no block large enough has been found
+        if (bestSegment = null) {
+            return null;
+        }
+        if (bestLength - size < 3) {
+            // block found has not enough space left, let's remove it
+            if (prevOfBestSegment = null) {
+                // in this case the segment found was the first one
+                let freeList = freeList[1];
+            } else {
+                let prevOfBestSegment[1] = bestSegment[1];
+            }
+        }
+        let bestSegment[0] = bestSegment[0] - (size + 1);
+        let newBlockAddress = bestSegment + bestSegment[0] + 1;
+        let memory[newBlockAddress - 1] = size + 1;
+        return newBlockAddress;
+    }
+
+    /** De-allocates the given object (cast as an array) by making
+     *  it available for future allocations. */
+    function void deAlloc(Array o) {
+        var int size;
+        var Array segment, prevSegment, currentSegment;
+        let segment = o - 1;
+        let size = segment[0];
+        let segment[1] = null;
+        // fetching the tail of freeList
+        let prevSegment = null;
+        let currentSegment = freeList;
+        while(~(currentSegment = null)) {
+            let prevSegment = currentSegment;
+            let currentSegment = currentSegment[1];
+        }
+        // appending the new segment
+        let prevSegment[1] = segment;
+        return;
+    }
+}
