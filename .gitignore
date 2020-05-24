@@ -2,3 +2,5 @@
 tools/bin/*.dat
 __pycache__
 .mypy_cache
+projects/11/**/*.vm
+projects/12/**/*.vm
