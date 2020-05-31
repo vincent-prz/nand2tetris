@@ -77,12 +77,43 @@ class Math {
      *  the Jack expressions x/y and divide(x,y) return the same value.
      */
     function int divide(int x, int y) {
-        return 0;
+        var int absX, absY, q, absResult;
+        let absX = Math.abs(x);
+        let absY = Math.abs(y);
+        if (absY > absX) {
+            return 0;
+        }
+        let q = Math.divide(absX, 2 * absY);
+        if ((absX - (2 * q * absY)) < absY) {
+            let absResult = 2 * q;
+        } else {
+            let absResult = (2 * q) + 1;
+        }
+        if ((x > 0) & (y > 0)) {
+            return absResult;
+        }
+        if ((x < 0) & (y > 0)) {
+            return -absResult;
+        }
+        if ((x > 0) & (y < 0)) {
+            return -absResult;
+        }
+        return absResult;
     }
 
     /** Returns the integer part of the square root of x. */
     function int sqrt(int x) {
-        return 0;
+        var int y, j, tmp;
+        let y = 0;
+        let j = 7; // n/2 -1 where n = 16
+        while (j > -1) {
+            let tmp = (y + twoToThe[j]) * (y + twoToThe[j]);
+            if ((x - tmp) > -1) {
+                let y = y + twoToThe[j];
+            }
+            let j = j - 1;
+        }
+        return y;
     }
 
     /** Returns the greater number. */
