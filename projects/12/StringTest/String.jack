@@ -11,13 +11,14 @@
  * string-oriented operations.
  */
 class String {
-    field int length;
+    field int length, _maxLength;
     field Array array;
 
     /** constructs a new empty string with a maximum length of maxLength
      *  and initial length of 0. */
     constructor String new(int maxLength) {
         let length = 0;
+        let _maxLength = maxLength;
         if (maxLength > 0) {
             let array = Array.new(maxLength);
         }
@@ -26,7 +27,9 @@ class String {
 
     /** Disposes this string. */
     method void dispose() {
-        do Array.dispose(this);
+        if (_maxLength > 0) {
+            do array.dispose();
+        }
         return;
     }
 
